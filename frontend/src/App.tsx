@@ -2,13 +2,15 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import type {
   FragmentInput,
   ReconstructionResult,
+  IsolationResponse,
   ValidationIssue,
 } from "./types";
-import { ApiError, reconstruct } from "./api";
+import { ApiError, reconstruct, planIsolation } from "./api";
 import { SAMPLES } from "./sampleData";
 import FragmentTable, { type DraftRow } from "./components/FragmentTable";
 import ImportPanel from "./components/ImportPanel";
 import VerdictPanel from "./components/VerdictPanel";
+import IsolationPlan from "./components/IsolationPlan";
 import ValidationErrors from "./components/ValidationErrors";
 
 interface ClientIssue {
@@ -40,8 +42,13 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [stale, setStale] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [isolation, setIsolation] = useState<IsolationResponse | null>(null);
+  const [isoLoading, setIsoLoading] = useState(false);
+  const [isoError, setIsoError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const isoAbortRef = useRef<AbortController | null>(null);
   const seqRef = useRef(0);
+  const isoSeqRef = useRef(0);
 
   const clientCheck = useCallback(
     (length: number, drafts: DraftRow[]): ClientIssue[] => {
@@ -96,12 +103,69 @@ export default function App() {
   );
 
   const invalidate = useCallback(() => {
-    // 修改输入后立即撤下旧裁决, 并作废任何在途请求, 防止旧响应晚到覆盖状态。
+    // 修改输入后立即撤下旧裁决与任何隔离方案, 并作废在途请求,
+    // 防止旧响应晚到覆盖状态(避免新输入配旧结论)。
     seqRef.current += 1;
+    isoSeqRef.current += 1;
     abortRef.current?.abort();
+    isoAbortRef.current?.abort();
     setStale(true);
     setIssues([]);
+    setIsolation(null);
+    setIsoError(null);
+    setIsoLoading(false);
   }, []);
+
+  const buildFragments = useCallback(
+    (drafts: DraftRow[]): FragmentInput[] =>
+      drafts.map((row) => ({
+        id: row.id,
+        offset: Number(row.offset.trim()),
+        payload: row.payload.replace(/\s+/g, "").toUpperCase(),
+        weight: Number(row.weight.trim()),
+      })),
+    [],
+  );
+
+  const handlePlanIsolation = useCallback(
+    async (selectedHex: string) => {
+      const length = Number(targetLength);
+      isoAbortRef.current?.abort();
+      const controller = new AbortController();
+      isoAbortRef.current = controller;
+      const seq = ++isoSeqRef.current;
+      setIsoLoading(true);
+      setIsoError(null);
+      setIsolation(null);
+      try {
+        const res = await planIsolation(
+          {
+            target_length: length,
+            fragments: buildFragments(rows),
+            selected_hex: selectedHex,
+          },
+          controller.signal,
+        );
+        if (seq === isoSeqRef.current) {
+          setIsolation(res);
+          setIsoError(null);
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        if (seq !== isoSeqRef.current) return;
+        if (err instanceof ApiError && err.status === 422) {
+          setIsoError(
+            err.issues.map((i) => i.msg).join("；") || "请求被拒绝 (422)",
+          );
+        } else {
+          setIsoError(err instanceof Error ? err.message : "网络或服务错误");
+        }
+      } finally {
+        if (seq === isoSeqRef.current) setIsoLoading(false);
+      }
+    },
+    [targetLength, rows, buildFragments],
+  );
 
   const handleSubmit = useCallback(async () => {
     const length = Number(targetLength);
@@ -122,17 +186,18 @@ export default function App() {
       return;
     }
 
-    const fragments: FragmentInput[] = rows.map((row) => ({
-      id: row.id,
-      offset: Number(row.offset.trim()),
-      payload: row.payload.replace(/\s+/g, "").toUpperCase(),
-      weight: Number(row.weight.trim()),
-    }));
+    const fragments: FragmentInput[] = buildFragments(rows);
 
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     const seq = ++seqRef.current;
+    // 新重建立即撤下旧隔离方案。
+    isoSeqRef.current += 1;
+    isoAbortRef.current?.abort();
+    setIsolation(null);
+    setIsoError(null);
+    setIsoLoading(false);
     setLoading(true);
     setIssues([]);
     try {
@@ -175,6 +240,9 @@ export default function App() {
       setResult(null);
       setIssues([]);
       setStale(true);
+      setIsolation(null);
+      setIsoError(null);
+      setIsoLoading(false);
     },
     [],
   );
@@ -273,7 +341,23 @@ export default function App() {
 
         <section className="panel result-panel">
           {result && !stale ? (
-            <VerdictPanel result={result} />
+            <>
+              <VerdictPanel result={result} onPlanIsolation={handlePlanIsolation} />
+              {(isoLoading || isoError || isolation) && (
+                <IsolationPlan
+                  response={isolation}
+                  loading={isoLoading}
+                  error={isoError}
+                  onDismiss={() => {
+                    isoSeqRef.current += 1;
+                    isoAbortRef.current?.abort();
+                    setIsolation(null);
+                    setIsoError(null);
+                    setIsoLoading(false);
+                  }}
+                />
+              )}
+            </>
           ) : (
             <div className="empty-state">
               <p>

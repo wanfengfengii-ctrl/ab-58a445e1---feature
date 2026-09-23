@@ -51,10 +51,12 @@ function BodyCard({
   body,
   length,
   accent,
+  onPlanIsolation,
 }: {
   body: BodyWitness;
   length: number;
   accent: boolean;
+  onPlanIsolation?: (selectedHex: string) => void;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const coverage = useMemo(
@@ -70,6 +72,16 @@ function BodyCard({
         <span className="rank-tag">
           {body.rank === 1 ? "字节序最小正文" : "字节序次小正文"}
         </span>
+        {onPlanIsolation && (
+          <button
+            type="button"
+            className="btn small isolate-btn"
+            onClick={() => onPlanIsolation(body.hex)}
+            title={`以正文 ${body.hex} 为目标, 规划证据隔离方案`}
+          >
+            以此正文生成证据隔离方案
+          </button>
+        )}
       </div>
       <HexBodyView
         hex={body.hex}
@@ -99,7 +111,13 @@ function BodyCard({
   );
 }
 
-export default function VerdictPanel({ result }: { result: ReconstructionResult }) {
+export default function VerdictPanel({
+  result,
+  onPlanIsolation,
+}: {
+  result: ReconstructionResult;
+  onPlanIsolation?: (selectedHex: string) => void;
+}) {
   const meta = STATUS_TEXT[result.status];
   const hasInputConflicts = result.conflict_positions.length > 0;
   const diffPos =
@@ -137,6 +155,9 @@ export default function VerdictPanel({ result }: { result: ReconstructionResult 
         <div className="notice ambiguous-note">
           两份正文的首个差异位置为字节偏移 <strong>{diffPos}</strong>
           （0 起算）。歧义指“不同最优方案还原出不同正文”，与下方的输入片段冲突不是同一概念。
+          复核员可在任一候选正文上发起
+          <strong>证据隔离规划</strong>：服务在不改动片段内容与权重的前提下,
+          比较全部可行最优覆盖, 给出一组暂不采用的片段, 使重算唯一得到该正文。
         </div>
       )}
 
@@ -158,6 +179,9 @@ export default function VerdictPanel({ result }: { result: ReconstructionResult 
               body={b}
               length={result.target_length}
               accent={i === 0}
+              onPlanIsolation={
+                result.status === "AMBIGUOUS" ? onPlanIsolation : undefined
+              }
             />
           ))}
         </div>

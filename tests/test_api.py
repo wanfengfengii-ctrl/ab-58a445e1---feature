@@ -240,3 +240,132 @@ def test_ambiguous_scenario(client: TestClient) -> None:
     data = resp.json()
     assert data["status"] == "AMBIGUOUS"
     assert [b["hex"] for b in data["bodies"]] == ["10", "20"]
+
+
+# ---------- /api/isolate 证据隔离规划 ----------
+
+
+def test_isolate_happy_path(client: TestClient) -> None:
+    body = {
+        "target_length": 2,
+        "fragments": [
+            _frag("X", 0, "00", 100),
+            _frag("Y", 0, "01", 100),
+            _frag("Z", 1, "FF", 1),
+        ],
+        "selected_hex": "00FF",
+    }
+    resp = client.post("/api/isolate", json=body)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["selected_hex"] == "00FF"
+    plan = data["plan"]
+    assert plan["isolated_fragment_ids"] == ["Y"]
+    assert plan["isolated_weight"] == 100
+    assert plan["recomputed_optimal"] == {"total_weight": 101, "fragment_count": 2}
+    assert plan["witness_fragment_ids"] == ["X", "Z"]
+    item = plan["isolated_fragments"][0]
+    assert item["id"] == "Y"
+    assert item["restored_verdict"] == "AMBIGUOUS"
+    assert item["competitor_hex"] == "01FF"
+    assert item["competitor_witness_fragment_ids"] == ["Y", "Z"]
+    assert item["restored_optimal"]["total_weight"] == 101
+
+
+def test_isolate_accepts_lowercase_hex(client: TestClient) -> None:
+    body = {
+        "target_length": 1,
+        "fragments": [_frag("A", 0, "ab", 5), _frag("B", 0, "cd", 5)],
+        "selected_hex": "ab",
+    }
+    resp = client.post("/api/isolate", json=body)
+    assert resp.status_code == 200
+    assert resp.json()["plan"]["isolated_fragment_ids"] == ["B"]
+
+
+def test_isolate_rejects_non_ambiguous(client: TestClient) -> None:
+    body = {
+        "target_length": 4,
+        "fragments": [
+            _frag("A", 0, "1122", 10),
+            _frag("B", 2, "2233", 10),
+        ],
+        "selected_hex": "11222233",
+    }
+    resp = client.post("/api/isolate", json=body)
+    assert resp.status_code == 422
+    errors = resp.json()["detail"]
+    assert any(e["type"] == "value_error.verdict" for e in errors)
+
+
+def test_isolate_rejects_body_not_in_candidates(client: TestClient) -> None:
+    body = {
+        "target_length": 1,
+        "fragments": [_frag("A", 0, "10", 5), _frag("B", 0, "20", 5)],
+        "selected_hex": "99",
+    }
+    resp = client.post("/api/isolate", json=body)
+    assert resp.status_code == 422
+    errors = resp.json()["detail"]
+    sel_errors = [e for e in errors if e["loc"] == ["body", "selected_hex"]]
+    assert len(sel_errors) == 1
+    assert sel_errors[0]["type"] == "value_error.selection"
+
+
+def test_isolate_missing_selected_hex(client: TestClient) -> None:
+    body = {
+        "target_length": 1,
+        "fragments": [_frag("A", 0, "10", 5), _frag("B", 0, "20", 5)],
+    }
+    resp = client.post("/api/isolate", json=body)
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["body", "selected_hex"]
+
+
+def test_isolate_malformed_selected_hex(client: TestClient) -> None:
+    body = {
+        "target_length": 1,
+        "fragments": [_frag("A", 0, "10", 5), _frag("B", 0, "20", 5)],
+        "selected_hex": "ZZ",
+    }
+    resp = client.post("/api/isolate", json=body)
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["body", "selected_hex"]
+
+
+def test_isolate_still_validates_fragments(client: TestClient) -> None:
+    body = {
+        "target_length": 1,
+        "fragments": [
+            _frag("DUP", 0, "10", 5),
+            _frag("DUP", 0, "20", 5),
+        ],
+        "selected_hex": "10",
+    }
+    resp = client.post("/api/isolate", json=body)
+    assert resp.status_code == 422
+    locs = [tuple(e["loc"]) for e in resp.json()["detail"]]
+    assert ("body", "fragments", 1, "id") in locs
+
+
+def test_isolate_compares_all_covers_not_only_two(client: TestClient) -> None:
+    # 4 个最优正文(页面仅展示两份), 正确隔离必须同时挡住 P 与 Q。
+    body = {
+        "target_length": 2,
+        "fragments": [
+            _frag("A0", 0, "00", 5),
+            _frag("P", 0, "01", 5),
+            _frag("A1", 1, "00", 5),
+            _frag("Q", 1, "01", 5),
+        ],
+        "selected_hex": "0000",
+    }
+    resp = client.post("/api/isolate", json=body)
+    assert resp.status_code == 200
+    plan = resp.json()["plan"]
+    assert plan["competing_body_count"] == 4
+    assert set(plan["isolated_fragment_ids"]) == {"P", "Q"}
+    # 逐项反例齐备。
+    counters = {it["id"]: it for it in plan["isolated_fragments"]}
+    assert counters["P"]["competitor_hex"] == "0100"
+    assert counters["Q"]["competitor_hex"] == "0001"

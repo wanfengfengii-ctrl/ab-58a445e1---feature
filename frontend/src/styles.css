@@ -695,3 +695,162 @@ input.mono {
   gap: 10px;
   margin-top: 12px;
 }
+
+/* ---- 证据隔离规划 ---- */
+
+.isolate-btn {
+  margin-left: auto;
+  border-color: var(--ambiguous);
+  color: var(--ambiguous);
+  white-space: nowrap;
+}
+
+.isolate-btn:hover:not(:disabled) {
+  background: rgba(210, 153, 34, 0.12);
+  border-color: var(--ambiguous);
+}
+
+.isolation-panel {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.isolation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.isolation-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.isolation-error {
+  margin: 8px 0;
+  color: var(--impossible);
+  font-size: 13px;
+  border: 1px solid var(--impossible);
+  background: rgba(248, 81, 73, 0.07);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.isolation-panel code {
+  font-family: var(--mono);
+  color: var(--accent);
+}
+
+.iso-section {
+  margin-top: 12px;
+}
+
+.iso-section-title {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.iso-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.iso-list li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: rgba(248, 81, 73, 0.06);
+  border: 1px solid rgba(248, 81, 73, 0.25);
+  font-size: 12.5px;
+}
+
+.iso-check {
+  color: var(--impossible);
+  font-weight: 700;
+}
+
+.iso-witness {
+  margin: 0;
+  background: rgba(63, 185, 80, 0.08);
+  border: 1px solid rgba(63, 185, 80, 0.3);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  word-break: break-all;
+}
+
+.counter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.counter-item {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.counter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.verdict-tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+}
+
+.verdict-tag.unique {
+  color: var(--unique);
+  border-color: var(--unique);
+}
+
+.verdict-tag.ambiguous {
+  color: var(--ambiguous);
+  border-color: var(--ambiguous);
+}
+
+.verdict-tag.impossible {
+  color: var(--impossible);
+  border-color: var(--impossible);
+}
+
+.counter-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.counter-row {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  align-items: baseline;
+}
+
+.counter-label {
+  color: var(--muted);
+  min-width: 64px;
+}
+
+.counter-row code {
+  color: var(--ambiguous);
+  word-break: break-all;
+}

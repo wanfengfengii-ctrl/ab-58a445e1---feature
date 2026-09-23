@@ -43,6 +43,28 @@ API 返回这两个最优值（`optimal.total_weight` / `optimal.fragment_count`
 > 输入层的**片段冲突**（证据互相矛盾的位置）与裁决结果的**正文歧义**（不同最优方案还原不同正文）是两个独立概念：
 > 例如高权片段互斥但一边占优时，存在冲突位置却裁决 UNIQUE；页面会同时展示两者，帮助复核员区分。
 
+### 证据隔离（AMBIGUOUS 复核）
+
+当裁决为 `AMBIGUOUS` 时，复核员可在两份候选正文中**任选一份**发起证据隔离规划
+（`POST /api/isolate`，请求体在重建请求之上追加 `selected_hex`）。服务在**不改动任何
+片段内容与权重**的前提下，找出一组"暂不采用"的片段，使剩余证据按现有（先总权重、后
+片段数）规则重算后**唯一**得到所选正文。方案依次最小化：
+
+1. 隔离片段数；
+2. 隔离片段的权重总和；
+3. 编号升序列表的字典序（前两者持平时取最小）。
+
+规划**比较全部可行的最优覆盖**（而非仅页面展示的两份见证）：例如 4 份最优正文只展示
+字节序最小的两份时，仅挡住展示的第二份并不够，方案仍会隔离产生其余正文所需的片段。
+
+响应给出重算后的最优值与唯一见证、隔离权重总和，并为**每个**被隔离片段提供单独恢复
+该片段（其余隔离项仍撤下）后的**反例裁决**与**竞争正文**，证明该片段在方案中不可
+省略——恢复后所选正文立即重新失去唯一最优地位（裁决回到 `AMBIGUOUS`）。
+
+关键依据：权重恒正时，给定正文的最优见证是强制的（凡与正文一致的片段必被全取，分歧
+者必被排除），故规划可归约为在全部竞争最优正文之见证集合上求最小击中集；被隔离片段
+一律不属于所选正文的见证，因此重算最优总权重与原最优一致，片段内容与权重从未被修改。
+
 ## 2. HTTP API
 
 ### `POST /api/reconstruct`
@@ -83,6 +105,55 @@ API 返回这两个最优值（`optimal.total_weight` / `optimal.fragment_count`
   "impossible_reason": null
 }
 ```
+
+其他端点：`GET /healthz`（容器健康检查）、`GET /api/health`。
+
+### `POST /api/isolate`
+
+仅当重建裁决为 `AMBIGUOUS` 时可用。请求体与 `/api/reconstruct` 相同，另加
+`selected_hex`（两份候选正文之一，十六进制大小写不敏感）：
+
+```json
+{
+  "target_length": 2,
+  "fragments": [
+    {"id": "X", "offset": 0, "payload": "00", "weight": 100},
+    {"id": "Y", "offset": 0, "payload": "01", "weight": 100},
+    {"id": "Z", "offset": 1, "payload": "FF", "weight": 1}
+  ],
+  "selected_hex": "00FF"
+}
+```
+
+成功响应（节选）：
+
+```json
+{
+  "selected_hex": "00FF",
+  "original_optimal": {"total_weight": 101, "fragment_count": 2},
+  "plan": {
+    "isolated_fragment_ids": ["Y"],
+    "isolated_weight": 100,
+    "retained_fragment_count": 2,
+    "recomputed_optimal": {"total_weight": 101, "fragment_count": 2},
+    "witness_fragment_ids": ["X", "Z"],
+    "competing_body_count": 2,
+    "isolated_fragments": [
+      {
+        "id": "Y", "offset": 0, "payload": "01", "weight": 100,
+        "restored_verdict": "AMBIGUOUS",
+        "competitor_hex": "01FF",
+        "competitor_witness_fragment_ids": ["Y", "Z"],
+        "restored_optimal": {"total_weight": 101, "fragment_count": 2}
+      }
+    ]
+  }
+}
+```
+
+错误（HTTP 422）：输入本身不合法（沿用 `/api/reconstruct` 的字段定位）、当前裁决不是
+`AMBIGUOUS`（`type=value_error.verdict`）、或 `selected_hex` 不在两份候选正文中
+（`type=value_error.selection`，定位到 `selected_hex`）。
 
 ### 错误响应（HTTP 422）
 
@@ -138,11 +209,13 @@ echo "exit code = $?"   # 0 表示全部通过
 
 容器内执行的三步与本地一致：
 
-1. `pytest`：求解器与 API 共 32 项测试，覆盖高权片段互斥、等分正文、缺口、冲突致不可行、
+1. `pytest`：求解器、隔离规划器与 API 的测试，覆盖高权片段互斥、等分正文、缺口、冲突致不可行、
    等权双正文的无符号字节序、同权重按片段数决胜、非法输入 422 与字段定位；
+   隔离规划覆盖最小片数/权重/编号字典序目标序、全部可行覆盖比较（不止展示的两份）、
+   逐项恢复反例与 2^14 最优正文对抗实例；
 2. `npm run build`：TypeScript 严格类型检查 + Vite 生产构建；
 3. `scripts/smoke_api.py`：容器内启动真实 uvicorn，发起 HTTP 冒烟（健康检查、静态首页、
-   UNIQUE / AMBIGUOUS / IMPOSSIBLE 与 422 字段定位）。
+   UNIQUE / AMBIGUOUS / IMPOSSIBLE、证据隔离规划与 422 字段定位）。
 
 本地也可直接运行：
 
@@ -158,7 +231,11 @@ APP_DIR=$PWD bash scripts/verify.sh
 - **正文十六进制视图**：每行 16 字节，带偏移与 ASCII 列；悬停见证片段高亮其覆盖区间，
   绿色底色标出多片段一致重叠位置。
 - **裁决横幅**：绿（UNIQUE）/ 琥珀（AMBIGUOUS）/ 红（IMPOSSIBLE），并附最大总权重与最优片段数。
-- **歧义对照**：AMBIGUOUS 时并列展示字节序最小的两份正文、首个差异偏移，以及各自片段见证。
+- **歧义对照**：AMBIGUOUS 时并列展示字节序最小的两份正文、首个差异偏移，以及各自片段见证；
+  每份正文卡片上可一键**以此正文生成证据隔离方案**。
+- **证据隔离方案**：展示隔离项清单（编号/偏移/载荷/权重，供核对）、隔离片数与权重总和、
+  重算最优值与唯一见证，以及每个隔离项**单独恢复后的反例裁决与竞争正文**。
+  任何输入改动或重新提交重建都会立即撤下旧方案，避免新输入配旧结论。
 - **冲突与缺口扫描栅格**：逐字节标注冲突（琥珀）与缺口（红），点击冲突格查看各片段主张的字节，
   使"片段冲突"与"正文歧义"清晰可分。
 
@@ -173,3 +250,9 @@ APP_DIR=$PWD bash scripts/verify.sh
 - 找到最优解后按正文内容归并，区分 UNIQUE / AMBIGUOUS，并以字节字典序（等价无符号字节序）取最小两份。
 
 求解器已通过 300 组随机小实例与暴力枚举的交叉验证（零分歧），28 片段对抗实例在毫秒级完成。
+
+证据隔离规划复用同一枚举器取得**全部**最优正文及其（在正权重下强制的）见证集合，将问题
+归约为"击中所有竞争正文见证"的最小击中集：先做包含意义下的极小目标归约，再以
+MRV（候选最少目标优先）分支 + 必选传播 + 贪心集合装载下界做分支限界，按
+（片数, 权重和, 编号列表字典序）比较；最后真实重算隔离后的片段集以验证唯一最优，并对
+每个隔离项单独恢复、重算以取得反例竞争正文。

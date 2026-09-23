@@ -229,3 +229,35 @@ def parse_request(payload: Any) -> tuple[int, list[Fragment]]:
         raise ValidationError(errors)
 
     return target_length, fragments  # type: ignore[return-value]
+
+
+def parse_selected_hex(payload: Any) -> str:
+    """从请求体中取出复核员选定的正文 selected_hex, 并做基本格式校验。
+
+    跨字段校验(是否为当前重建的最优正文之一)由调用方结合求解结果完成。
+    """
+    if not isinstance(payload, dict):
+        raise ValidationError(
+            [_err([], "请求体必须是 JSON 对象", "type_error")]
+        )
+    if "selected_hex" not in payload:
+        raise ValidationError(
+            [_err(["selected_hex"], "字段必填", "missing")]
+        )
+    raw = payload["selected_hex"]
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValidationError(
+            [_err(["selected_hex"], "必须是非空十六进制字符串", "value_error.hex")]
+        )
+    value = raw.strip()
+    if len(value) % 2 != 0 or not _HEX_RE.match(value):
+        raise ValidationError(
+            [
+                _err(
+                    ["selected_hex"],
+                    "必须是偶数长度的十六进制字符串(仅允许 0-9 a-f A-F)",
+                    "value_error.hex",
+                )
+            ]
+        )
+    return value.upper()

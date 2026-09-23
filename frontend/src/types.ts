@@ -52,3 +52,41 @@ export interface ValidationIssue {
   msg: string;
   type: string;
 }
+
+export interface IsolatedFragment {
+  id: string;
+  offset: number;
+  payload: string;
+  weight: number;
+  restored_verdict: "UNIQUE" | "AMBIGUOUS" | "IMPOSSIBLE";
+  competitor_hex: string | null;
+  competitor_witness_fragment_ids: string[];
+  restored_optimal: {
+    total_weight: number | null;
+    fragment_count: number | null;
+  };
+}
+
+export interface IsolationPlan {
+  selected_hex: string;
+  isolated_fragment_ids: string[];
+  isolated_weight: number;
+  retained_fragment_count: number;
+  recomputed_optimal: {
+    total_weight: number;
+    fragment_count: number;
+  };
+  witness_fragment_ids: string[];
+  competing_body_count: number;
+  isolated_fragments: IsolatedFragment[];
+}
+
+export interface IsolationResponse {
+  target_length: number;
+  selected_hex: string;
+  original_optimal: {
+    total_weight: number | null;
+    fragment_count: number | null;
+  };
+  plan: IsolationPlan;
+}

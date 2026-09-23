@@ -136,6 +136,79 @@ def main() -> None:
     check(("body", "fragments", 1, "weight") in locs,
           "422 定位到 fragments[1].weight")
 
+    # 7) AMBIGUOUS -> /api/isolate 证据隔离规划
+    iso_body = {
+        "target_length": 2,
+        "fragments": [
+            {"id": "X", "offset": 0, "payload": "00", "weight": 100},
+            {"id": "Y", "offset": 0, "payload": "01", "weight": 100},
+            {"id": "Z", "offset": 1, "payload": "FF", "weight": 1},
+        ],
+        "selected_hex": "00FF",
+    }
+    status, data = request("POST", "/api/isolate", iso_body)
+    check(status == 200, "证据隔离规划返回 200")
+    assert isinstance(data, dict)
+    plan = data["plan"]
+    check(plan["isolated_fragment_ids"] == ["Y"],
+          "最小隔离方案为仅隔离片段 Y")
+    check(plan["isolated_weight"] == 100, "隔离权重总和为 100")
+    check(plan["recomputed_optimal"] == {"total_weight": 101, "fragment_count": 2},
+          "重算最优值为总权重 101 / 2 片(权重未改动)")
+    check(plan["witness_fragment_ids"] == ["X", "Z"], "重算唯一见证为 X, Z")
+    check(plan["competing_body_count"] == 2, "规划比较了全部 2 份最优正文")
+    item = plan["isolated_fragments"][0]
+    check(item["id"] == "Y"
+          and item["restored_verdict"] == "AMBIGUOUS"
+          and item["competitor_hex"] == "01FF",
+          "逐项反例: 单独恢复 Y 重新歧义, 竞争正文 01FF")
+
+    # 8) 隔离规划比较全部可行覆盖(不止展示的两份)
+    status, data = request("POST", "/api/isolate", {
+        "target_length": 2,
+        "fragments": [
+            {"id": "A0", "offset": 0, "payload": "00", "weight": 5},
+            {"id": "P", "offset": 0, "payload": "01", "weight": 5},
+            {"id": "A1", "offset": 1, "payload": "00", "weight": 5},
+            {"id": "Q", "offset": 1, "payload": "01", "weight": 5},
+        ],
+        "selected_hex": "0000",
+    })
+    check(status == 200, "全覆盖比较用例返回 200")
+    assert isinstance(data, dict)
+    plan = data["plan"]
+    check(plan["competing_body_count"] == 4,
+          "共有 4 份最优正文(页面仅展示字节序最小两份)")
+    check(set(plan["isolated_fragment_ids"]) == {"P", "Q"},
+          "必须同时隔离 P 与 Q, 不能只挡住展示的第二份正文")
+
+    # 9) 隔离规划的非法用法 -> 422
+    status, data = request("POST", "/api/isolate", {
+        "target_length": 4,
+        "fragments": [
+            {"id": "A", "offset": 0, "payload": "1122", "weight": 10},
+            {"id": "B", "offset": 2, "payload": "2233", "weight": 10},
+        ],
+        "selected_hex": "11222233",
+    })
+    check(status == 422, "对 UNIQUE 结果发起隔离返回 422")
+    assert isinstance(data, dict)
+    check(any(e["type"] == "value_error.verdict" for e in data["detail"]),
+          "422 指明仅 AMBIGUOUS 可规划隔离")
+
+    status, data = request("POST", "/api/isolate", {
+        "target_length": 1,
+        "fragments": [
+            {"id": "A", "offset": 0, "payload": "10", "weight": 5},
+            {"id": "B", "offset": 0, "payload": "20", "weight": 5},
+        ],
+        "selected_hex": "99",
+    })
+    check(status == 422, "选择非候选正文返回 422")
+    assert isinstance(data, dict)
+    check(any(tuple(e["loc"]) == ("body", "selected_hex") for e in data["detail"]),
+          "422 定位到 selected_hex")
+
     print("[SMOKE] 全部冒烟检查通过。")
 
 

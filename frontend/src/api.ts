@@ -1,6 +1,7 @@
 import type {
   ReconstructionResult,
   ReconstructRequest,
+  IsolationResponse,
   ValidationIssue,
 } from "./types";
 
@@ -15,14 +16,15 @@ export class ApiError extends Error {
   }
 }
 
-export async function reconstruct(
-  request: ReconstructRequest,
+async function postJson(
+  path: string,
+  body: unknown,
   signal?: AbortSignal,
-): Promise<ReconstructionResult> {
-  const resp = await fetch("/api/reconstruct", {
+): Promise<unknown> {
+  const resp = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
+    body: JSON.stringify(body),
     signal,
   });
 
@@ -35,5 +37,19 @@ export async function reconstruct(
       { loc: ["body"], msg: `服务异常: HTTP ${resp.status}`, type: "http_error" },
     ]);
   }
-  return (await resp.json()) as ReconstructionResult;
+  return resp.json();
+}
+
+export async function reconstruct(
+  request: ReconstructRequest,
+  signal?: AbortSignal,
+): Promise<ReconstructionResult> {
+  return (await postJson("/api/reconstruct", request, signal)) as ReconstructionResult;
+}
+
+export async function planIsolation(
+  request: ReconstructRequest & { selected_hex: string },
+  signal?: AbortSignal,
+): Promise<IsolationResponse> {
+  return (await postJson("/api/isolate", request, signal)) as IsolationResponse;
 }
