@@ -52,3 +52,32 @@ export interface ValidationIssue {
   msg: string;
   type: string;
 }
+
+export interface Counterexample {
+  fragment_id: string;
+  restored_verdict: "AMBIGUOUS";
+  selected_hex: string;
+  rival_hex: string;
+  rival_witness_fragment_ids: string[];
+  optimal: {
+    total_weight: number;
+    fragment_count: number;
+  };
+}
+
+export interface IsolationPlan {
+  selected_hex: string;
+  isolated_fragment_ids: string[];
+  isolated_fragments: AdoptedFragment[];
+  isolated_weight: number;
+  optimal: {
+    total_weight: number;
+    fragment_count: number;
+  };
+  target_body: BodyWitness;
+  counterexamples: Counterexample[];
+}
+
+export interface IsolateRequest extends ReconstructRequest {
+  selected_hex: string;
+}

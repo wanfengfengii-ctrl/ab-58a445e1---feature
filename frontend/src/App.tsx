@@ -2,13 +2,15 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import type {
   FragmentInput,
   ReconstructionResult,
+  IsolationPlan,
   ValidationIssue,
 } from "./types";
-import { ApiError, reconstruct } from "./api";
+import { ApiError, isolate, reconstruct } from "./api";
 import { SAMPLES } from "./sampleData";
 import FragmentTable, { type DraftRow } from "./components/FragmentTable";
 import ImportPanel from "./components/ImportPanel";
 import VerdictPanel from "./components/VerdictPanel";
+import IsolationPanel from "./components/IsolationPanel";
 import ValidationErrors from "./components/ValidationErrors";
 
 interface ClientIssue {
@@ -40,8 +42,17 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [stale, setStale] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [plan, setPlan] = useState<IsolationPlan | null>(null);
+  const [planningHex, setPlanningHex] = useState<string | null>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const lastRequestRef = useRef<{
+    target_length: number;
+    fragments: FragmentInput[];
+  } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const planAbortRef = useRef<AbortController | null>(null);
   const seqRef = useRef(0);
+  const planSeqRef = useRef(0);
 
   const clientCheck = useCallback(
     (length: number, drafts: DraftRow[]): ClientIssue[] => {
@@ -96,11 +107,17 @@ export default function App() {
   );
 
   const invalidate = useCallback(() => {
-    // 修改输入后立即撤下旧裁决, 并作废任何在途请求, 防止旧响应晚到覆盖状态。
+    // 修改输入后立即撤下旧裁决与旧隔离方案, 并作废任何在途请求,
+    // 防止旧响应晚到覆盖状态。
     seqRef.current += 1;
+    planSeqRef.current += 1;
     abortRef.current?.abort();
+    planAbortRef.current?.abort();
     setStale(true);
     setIssues([]);
+    setPlan(null);
+    setPlanningHex(null);
+    setPlanError(null);
   }, []);
 
   const handleSubmit = useCallback(async () => {
@@ -119,6 +136,9 @@ export default function App() {
       setIssues(local);
       setResult(null);
       setStale(false);
+      setPlan(null);
+      setPlanningHex(null);
+      setPlanError(null);
       return;
     }
 
@@ -143,6 +163,11 @@ export default function App() {
       if (seq === seqRef.current) {
         setResult(res);
         setStale(false);
+        // 新重建结果到达: 旧隔离方案不再适用, 立即撤下。
+        setPlan(null);
+        setPlanningHex(null);
+        setPlanError(null);
+        lastRequestRef.current = { target_length: length, fragments };
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
@@ -175,9 +200,48 @@ export default function App() {
       setResult(null);
       setIssues([]);
       setStale(true);
+      setPlan(null);
+      setPlanningHex(null);
+      setPlanError(null);
+      lastRequestRef.current = null;
     },
     [],
   );
+
+  const handlePlanIsolation = useCallback(async (selectedHex: string) => {
+    const basis = lastRequestRef.current;
+    if (!basis) return;
+    planAbortRef.current?.abort();
+    const controller = new AbortController();
+    planAbortRef.current = controller;
+    const seq = ++planSeqRef.current;
+    setPlanningHex(selectedHex);
+    setPlanError(null);
+    setPlan(null);
+    try {
+      const planRes = await isolate(
+        {
+          target_length: basis.target_length,
+          fragments: basis.fragments,
+          selected_hex: selectedHex,
+        },
+        controller.signal,
+      );
+      if (seq === planSeqRef.current) setPlan(planRes);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (seq !== planSeqRef.current) return;
+      setPlanError(
+        err instanceof ApiError
+          ? err.issues.map((i) => i.msg).join("; ")
+          : err instanceof Error
+            ? err.message
+            : "隔离规划请求失败",
+      );
+    } finally {
+      if (seq === planSeqRef.current) setPlanningHex(null);
+    }
+  }, []);
 
   const errorFieldMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -273,7 +337,27 @@ export default function App() {
 
         <section className="panel result-panel">
           {result && !stale ? (
-            <VerdictPanel result={result} />
+            <>
+              <VerdictPanel
+                result={result}
+                onPlanIsolation={handlePlanIsolation}
+                planningHex={planningHex}
+              />
+              {planError && (
+                <div className="error-panel">
+                  <h4>隔离规划失败</h4>
+                  <ul>
+                    <li>{planError}</li>
+                  </ul>
+                </div>
+              )}
+              {plan && (
+                <IsolationPanel
+                  plan={plan}
+                  onDismiss={() => setPlan(null)}
+                />
+              )}
+            </>
           ) : (
             <div className="empty-state">
               <p>

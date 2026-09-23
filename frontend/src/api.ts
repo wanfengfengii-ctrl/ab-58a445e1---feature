@@ -1,6 +1,8 @@
 import type {
   ReconstructionResult,
   ReconstructRequest,
+  IsolationPlan,
+  IsolateRequest,
   ValidationIssue,
 } from "./types";
 
@@ -36,4 +38,27 @@ export async function reconstruct(
     ]);
   }
   return (await resp.json()) as ReconstructionResult;
+}
+
+export async function isolate(
+  request: IsolateRequest,
+  signal?: AbortSignal,
+): Promise<IsolationPlan> {
+  const resp = await fetch("/api/isolate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+    signal,
+  });
+
+  if (resp.status === 422) {
+    const data = await resp.json();
+    throw new ApiError(422, data.detail ?? []);
+  }
+  if (!resp.ok) {
+    throw new ApiError(resp.status, [
+      { loc: ["body"], msg: `服务异常: HTTP ${resp.status}`, type: "http_error" },
+    ]);
+  }
+  return (await resp.json()) as IsolationPlan;
 }

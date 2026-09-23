@@ -51,10 +51,14 @@ function BodyCard({
   body,
   length,
   accent,
+  onPlanIsolation,
+  planning,
 }: {
   body: BodyWitness;
   length: number;
   accent: boolean;
+  onPlanIsolation?: (hex: string) => void;
+  planning?: boolean;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const coverage = useMemo(
@@ -70,6 +74,17 @@ function BodyCard({
         <span className="rank-tag">
           {body.rank === 1 ? "字节序最小正文" : "字节序次小正文"}
         </span>
+        {onPlanIsolation && (
+          <button
+            type="button"
+            className="btn small plan-btn"
+            disabled={planning}
+            onClick={() => onPlanIsolation(body.hex)}
+            title="在不改动片段内容与权重的前提下, 规划暂不采用的片段, 使重算唯一得到本正文"
+          >
+            {planning ? "规划中…" : "以此正文规划证据隔离"}
+          </button>
+        )}
       </div>
       <HexBodyView
         hex={body.hex}
@@ -99,7 +114,15 @@ function BodyCard({
   );
 }
 
-export default function VerdictPanel({ result }: { result: ReconstructionResult }) {
+export default function VerdictPanel({
+  result,
+  onPlanIsolation,
+  planningHex,
+}: {
+  result: ReconstructionResult;
+  onPlanIsolation?: (hex: string) => void;
+  planningHex?: string | null;
+}) {
   const meta = STATUS_TEXT[result.status];
   const hasInputConflicts = result.conflict_positions.length > 0;
   const diffPos =
@@ -158,6 +181,10 @@ export default function VerdictPanel({ result }: { result: ReconstructionResult 
               body={b}
               length={result.target_length}
               accent={i === 0}
+              onPlanIsolation={
+                result.status === "AMBIGUOUS" ? onPlanIsolation : undefined
+              }
+              planning={planningHex === b.hex}
             />
           ))}
         </div>
